@@ -1,0 +1,149 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "PharmaFlow Gateway API Contract",
+    "version": "1.0.0",
+    "description": "Complete versioned API contract for PharmaFlow Browser BFF and Microservices"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Local Development BFF Gateway"
+    }
+  ],
+  "paths": {
+    "/api/bff/login": {
+      "post": {
+        "summary": "Authenticate user and establish HttpOnly cookie session with CSRF protection",
+        "tags": ["BFF"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                },
+                "required": ["email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Session established in HttpOnly cookie" },
+          "401": { "description": "Invalid credentials or locked account" }
+        }
+      }
+    },
+    "/api/bff/logout": {
+      "post": {
+        "summary": "Revoke current session and clear HttpOnly cookie",
+        "tags": ["BFF"],
+        "responses": { "200": { "description": "Logged out" } }
+      }
+    },
+    "/api/bff/user": {
+      "get": {
+        "summary": "Get authenticated user profile from current session",
+        "tags": ["BFF"],
+        "responses": { "200": { "description": "Current user profile" } }
+      }
+    },
+    "/api/bff/csrf": {
+      "get": {
+        "summary": "Generate fresh CSRF cookie",
+        "tags": ["BFF"],
+        "responses": { "200": { "description": "CSRF token returned" } }
+      }
+    },
+    "/api/auth/bootstrap-status": {
+      "get": {
+        "summary": "Check if first-admin bootstrap is required",
+        "tags": ["Auth"],
+        "responses": { "200": { "description": "Bootstrap status" } }
+      }
+    },
+    "/api/auth/bootstrap-admin": {
+      "post": {
+        "summary": "Perform one-time first-admin bootstrap",
+        "tags": ["Auth"],
+        "responses": { "200": { "description": "Admin created" } }
+      }
+    },
+    "/api/branches": {
+      "get": {
+        "summary": "List all pharmacy branches",
+        "tags": ["Branches"],
+        "responses": { "200": { "description": "List of branches" } }
+      },
+      "post": {
+        "summary": "Create new branch",
+        "tags": ["Branches"],
+        "responses": { "200": { "description": "Branch created" } }
+      }
+    },
+    "/api/catalogue/products": {
+      "get": {
+        "summary": "Search catalogue products",
+        "tags": ["Catalogue"],
+        "responses": { "200": { "description": "Paged products" } }
+      },
+      "post": {
+        "summary": "Create product with barcodes and conversions",
+        "tags": ["Catalogue"],
+        "responses": { "200": { "description": "Product created" } }
+      }
+    },
+    "/api/shifts/current": {
+      "get": {
+        "summary": "Get currently active cashier shift",
+        "tags": ["Shifts"],
+        "responses": { "200": { "description": "Current shift details" } }
+      }
+    },
+    "/api/shifts/open": {
+      "post": {
+        "summary": "Open cashier shift with starting float",
+        "tags": ["Shifts"],
+        "responses": { "200": { "description": "Shift opened" } }
+      }
+    },
+    "/api/pos/checkout": {
+      "post": {
+        "summary": "Execute idempotent POS checkout and print invoice",
+        "tags": ["POS"],
+        "responses": { "200": { "description": "Sale posted with invoice number" } }
+      }
+    },
+    "/api/pos/returns": {
+      "post": {
+        "summary": "Process return referencing original invoice with quarantine routing",
+        "tags": ["POS"],
+        "responses": { "200": { "description": "Return processed" } }
+      }
+    },
+    "/api/inventory/batches": {
+      "get": {
+        "summary": "Query stock batches with FEFO status",
+        "tags": ["Inventory"],
+        "responses": { "200": { "description": "Stock batch list" } }
+      }
+    },
+    "/api/workforce/employees": {
+      "get": {
+        "summary": "List employees",
+        "tags": ["Workforce"],
+        "responses": { "200": { "description": "Employee list" } }
+      }
+    },
+    "/api/reporting/dashboard": {
+      "get": {
+        "summary": "Executive metrics and financial summaries",
+        "tags": ["Reporting"],
+        "responses": { "200": { "description": "Metrics summary" } }
+      }
+    }
+  }
+}

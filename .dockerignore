@@ -1,0 +1,17 @@
+**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/TestResults
+**/coverage
+**/logs
+**/*.log
+**/*.user
+**/*.local.json
+**/*.local.env
+**/azurite_data
+**/uploads
+**/storage
+README.md

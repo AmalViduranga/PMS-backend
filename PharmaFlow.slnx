@@ -1,0 +1,30 @@
+<Solution>
+  <Folder Name="/contracts/">
+    <Project Path="contracts/PharmaFlow.Contracts/PharmaFlow.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/gateway/">
+    <Project Path="gateway/PharmaFlow.Gateway/PharmaFlow.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/services/" />
+  <Folder Name="/services/commerce/">
+    <Project Path="services/commerce/PharmaFlow.Commerce.Api/PharmaFlow.Commerce.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/documents/">
+    <Project Path="services/documents/PharmaFlow.Documents.Api/PharmaFlow.Documents.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/identity/">
+    <Project Path="services/identity/PharmaFlow.Identity.Api/PharmaFlow.Identity.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/operations/">
+    <Project Path="services/operations/PharmaFlow.Operations.Api/PharmaFlow.Operations.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/reporting/">
+    <Project Path="services/reporting/PharmaFlow.Reporting.Api/PharmaFlow.Reporting.Api.csproj" />
+  </Folder>
+  <Folder Name="/services/workforce/">
+    <Project Path="services/workforce/PharmaFlow.Workforce.Api/PharmaFlow.Workforce.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PharmaFlow.UnitTests/PharmaFlow.UnitTests.csproj" />
+  </Folder>
+</Solution>

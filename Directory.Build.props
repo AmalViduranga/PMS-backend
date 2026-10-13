@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!--
+      Enable roll-forward to LatestMajor so that net8.0 target projects can execute
+      reproducibly across both net8.0 container runtimes and forward host runtimes
+      (such as .NET 10.0.12 present in the host environment) without manual runtime directory copies
+      or undocumented ad-hoc shell environment variable overrides.
+    -->
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+</Project>

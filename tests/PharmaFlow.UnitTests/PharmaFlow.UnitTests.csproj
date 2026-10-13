@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>LatestMajor</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" Version="4.20.70" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\contracts\PharmaFlow.Contracts\PharmaFlow.Contracts.csproj" />
+    <ProjectReference Include="..\..\services\identity\PharmaFlow.Identity.Api\PharmaFlow.Identity.Api.csproj" />
+    <ProjectReference Include="..\..\services\operations\PharmaFlow.Operations.Api\PharmaFlow.Operations.Api.csproj" />
+    <ProjectReference Include="..\..\services\workforce\PharmaFlow.Workforce.Api\PharmaFlow.Workforce.Api.csproj" />
+    <ProjectReference Include="..\..\services\documents\PharmaFlow.Documents.Api\PharmaFlow.Documents.Api.csproj" />
+    <ProjectReference Include="..\..\gateway\PharmaFlow.Gateway\PharmaFlow.Gateway.csproj" />
+  </ItemGroup>
+
+</Project>

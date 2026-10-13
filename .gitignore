@@ -1,0 +1,59 @@
+## Build & Compiler Output
+bin/
+obj/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Local Environment & Secret Files
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.local.json
+*.local.env
+.env.local
+secrets/
+*.pfx
+*.cer
+*.key
+*.pem
+
+## Database Files & Local Storage
+*.db
+*.sqlite
+*.sqlite3
+*.mdf
+*.ldf
+*.bak
+azurite_data/
+__blobstorage__/
+__queuestorage__/
+__tablestorage__/
+uploads/
+storage/
+
+## Logs & Diagnostics
+logs/
+*.log
+_profiling/
+*.diagnostic*
+
+## Test Results & Coverage
+TestResults/
+coverage/
+*.cobertura.xml
+
+## IDE & Tooling
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # -------------------------------------------------------------
+  # Core Infrastructure Services
+  # -------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: pharmaflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_root_pwd}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pharmaflow_pgdata:/var/lib/postgresql/data
+      - ./init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: pharmaflow-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-pharmaflow}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-rabbit_dev_pwd}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    volumes:
+      - pharmaflow_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.30.0
+    container_name: pharmaflow-azurite
+    restart: unless-stopped
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000"
+    ports:
+      - "${AZURITE_BLOB_PORT:-10000}:10000"
+    volumes:
+      - pharmaflow_azurite_data:/data
+
+  maildev:
+    image: maildev/maildev:2.1.0
+    container_name: pharmaflow-maildev
+    restart: unless-stopped
+    ports:
+      - "${MAILDEV_WEB_PORT:-1080}:1080"
+      - "${MAILDEV_SMTP_PORT:-1025}:1025"
+
+  # -------------------------------------------------------------
+  # Application Microservices & Gateway
+  # -------------------------------------------------------------
+  gateway:
+    build:
+      context: ../../
+      dockerfile: pharmaflow-backend/gateway/Dockerfile
+    container_name: pharmaflow-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-5000}:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+    depends_on:
+      identity-service:
+        condition: service_started
+      operations-service:
+        condition: service_started
+
+  identity-service:
+    build:
+      context: ../../
+      dockerfile: pharmaflow-backend/services/identity/Dockerfile
+    container_name: pharmaflow-identity
+    restart: unless-stopped
+    ports:
+      - "${IDENTITY_PORT:-5001}:5001"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5001
+      - ConnectionStrings__IdentityDb=Host=postgres;Port=5432;Database=pharmaflow_identity;Username=identity_user;Password=IdentitySecretPass123!
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  operations-service:
+    build:
+      context: ../../
+      dockerfile: pharmaflow-backend/services/operations/Dockerfile
+    container_name: pharmaflow-operations
+    restart: unless-stopped
+    ports:
+      - "${OPERATIONS_PORT:-5002}:5002"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5002
+      - ConnectionStrings__OperationsDb=Host=postgres;Port=5432;Database=pharmaflow_operations;Username=operations_user;Password=OperationsSecretPass123!
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pharmaflow_pgdata:
+  pharmaflow_rabbitmq_data:
+  pharmaflow_azurite_data:
