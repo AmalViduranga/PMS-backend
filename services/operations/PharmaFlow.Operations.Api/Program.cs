@@ -57,6 +57,7 @@ var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "PharmaFlow.Services"
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.MapInboundClaims = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -171,5 +172,7 @@ using (var scope = app.Services.CreateScope())
         logger.LogWarning(ex, "Could not run operations DB startup migration check.");
     }
 }
+
+app.Run();
 
 app.Run();

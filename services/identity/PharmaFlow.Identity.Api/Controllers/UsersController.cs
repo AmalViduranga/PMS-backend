@@ -121,4 +121,124 @@ public class UsersController : ControllerBase
         var roles = await _db.Roles.Select(r => new { r.Id, r.Name, r.Description }).ToListAsync();
         return Ok(ApiResponse<object>.Ok(roles));
     }
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetUserById(Guid id)
+    {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminUsers || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
+        var u = await _db.Users
+            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+            .Include(u => u.BranchAssignments)
+            .FirstOrDefaultAsync(u => u.Id == id);
+
+        if (u == null) return NotFound(ApiResponse<UserDto>.Fail("User not found."));
+
+        var dto = new UserDto(
+            u.Id,
+            u.Email,
+            u.FullName,
+            u.ActorType,
+            u.UserRoles.Select(ur => ur.Role.Name).ToList(),
+            new List<string>(),
+            u.BranchAssignments.FirstOrDefault(b => b.IsPrimary)?.BranchId ?? u.BranchAssignments.FirstOrDefault()?.BranchId
+        );
+
+        return Ok(ApiResponse<UserDto>.Ok(dto));
+    }
+
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateUser(Guid id, [FromBody] UpdateUserRequest req)
+    {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminUsers || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
+        var user = await _db.Users
+            .Include(u => u.UserRoles)
+            .Include(u => u.BranchAssignments)
+            .FirstOrDefaultAsync(u => u.Id == id);
+
+        if (user == null) return NotFound(ApiResponse<bool>.Fail("User not found."));
+
+        user.FullName = req.FullName.Trim();
+        user.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(req.RoleName))
+        {
+            var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == req.RoleName);
+            if (role != null)
+            {
+                _db.UserRoles.RemoveRange(user.UserRoles);
+                _db.UserRoles.Add(new UserRole { UserId = user.Id, RoleId = role.Id });
+            }
+        }
+
+        if (req.BranchIds != null)
+        {
+            _db.UserBranchAssignments.RemoveRange(user.BranchAssignments);
+            bool first = true;
+            foreach (var bId in req.BranchIds)
+            {
+                _db.UserBranchAssignments.Add(new UserBranchAssignment
+                {
+                    UserId = user.Id,
+                    BranchId = bId,
+                    IsPrimary = first
+                });
+                first = false;
+            }
+        }
+
+        if (req.IsActive.HasValue)
+        {
+            user.IsActive = req.IsActive.Value;
+            if (!user.IsActive)
+            {
+                var activeTokens = await _db.RefreshTokens
+                    .Where(rt => rt.UserId == user.Id && rt.RevokedAtUtc == null)
+                    .ToListAsync();
+                foreach (var rt in activeTokens)
+                {
+                    rt.RevokedAtUtc = DateTime.UtcNow;
+                }
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponse<bool>.Ok(true, "User updated successfully."));
+    }
+
+    [HttpPut("{id}/status")]
+    public async Task<IActionResult> UpdateUserStatus(Guid id, [FromBody] UpdateUserStatusRequest req)
+    {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminUsers || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user == null) return NotFound(ApiResponse<bool>.Fail("User not found."));
+
+        user.IsActive = req.IsActive;
+        user.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (!user.IsActive)
+        {
+            var activeTokens = await _db.RefreshTokens
+                .Where(rt => rt.UserId == user.Id && rt.RevokedAtUtc == null)
+                .ToListAsync();
+            foreach (var rt in activeTokens)
+            {
+                rt.RevokedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponse<bool>.Ok(true, $"User account successfully {(req.IsActive ? "activated" : "deactivated")}."));
+    }
 }

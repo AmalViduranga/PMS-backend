@@ -34,6 +34,11 @@ public class BranchesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateBranch([FromBody] CreateBranchRequest req)
     {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminBranches || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
         var org = await _db.Organizations.FirstOrDefaultAsync();
         if (org == null)
         {
@@ -67,6 +72,53 @@ public class BranchesController : ControllerBase
         return Ok(ApiResponse<Guid>.Ok(branch.Id, "Branch created successfully."));
     }
 
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetBranchById(Guid id)
+    {
+        var b = await _db.Branches.FirstOrDefaultAsync(x => x.Id == id);
+        if (b == null) return NotFound(ApiResponse<BranchDto>.Fail("Branch not found."));
+        return Ok(ApiResponse<BranchDto>.Ok(new BranchDto(b.Id, b.Code, b.Name, b.Address, b.Phone, b.Email, b.Timezone, b.Currency, b.IsActive)));
+    }
+
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateBranch(Guid id, [FromBody] UpdateBranchRequest req)
+    {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminBranches || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
+        var b = await _db.Branches.FirstOrDefaultAsync(x => x.Id == id);
+        if (b == null) return NotFound(ApiResponse<bool>.Fail("Branch not found."));
+
+        b.Name = req.Name.Trim();
+        b.Address = req.Address.Trim();
+        b.Phone = req.Phone.Trim();
+        b.Email = req.Email.Trim();
+        if (!string.IsNullOrWhiteSpace(req.Timezone)) b.Timezone = req.Timezone;
+        if (!string.IsNullOrWhiteSpace(req.Currency)) b.Currency = req.Currency;
+        if (req.IsActive.HasValue) b.IsActive = req.IsActive.Value;
+
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponse<bool>.Ok(true, "Branch updated successfully."));
+    }
+
+    [HttpPut("{id}/status")]
+    public async Task<IActionResult> UpdateBranchStatus(Guid id, [FromBody] UpdateBranchStatusRequest req)
+    {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminBranches || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
+        var b = await _db.Branches.FirstOrDefaultAsync(x => x.Id == id);
+        if (b == null) return NotFound(ApiResponse<bool>.Fail("Branch not found."));
+
+        b.IsActive = req.IsActive;
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponse<bool>.Ok(true, $"Branch successfully {(req.IsActive ? "activated" : "deactivated")}."));
+    }
+
     [HttpGet("registers")]
     public async Task<IActionResult> GetRegisters([FromQuery] Guid? branchId)
     {
@@ -83,6 +135,11 @@ public class BranchesController : ControllerBase
     [HttpPost("registers")]
     public async Task<IActionResult> CreateRegister([FromBody] CreateRegisterRequest req)
     {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.AdminBranches || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
         var branch = await _db.Branches.FirstOrDefaultAsync(b => b.Id == req.BranchId);
         if (branch == null) return BadRequest(ApiResponse<Guid>.Fail("Branch not found."));
 

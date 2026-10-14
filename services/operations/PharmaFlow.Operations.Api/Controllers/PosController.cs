@@ -28,7 +28,7 @@ public class PosController : ControllerBase
     [HttpPost("checkout")]
     public async Task<IActionResult> Checkout([FromBody] CheckoutSaleRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var result = await _posService.CheckoutAsync(req, userId);
@@ -43,7 +43,7 @@ public class PosController : ControllerBase
     [HttpPost("returns")]
     public async Task<IActionResult> ProcessReturn([FromBody] ProcessReturnRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var result = await _returnService.ProcessReturnAsync(req, userId);
@@ -96,6 +96,51 @@ public class PosController : ControllerBase
         );
 
         return Ok(ApiResponse<SaleDto>.Ok(dto));
+    }
+
+    [HttpGet("sales/{id}/receipt")]
+    public async Task<IActionResult> GetReceipt(Guid id)
+    {
+        var sale = await _db.Sales
+            .Include(s => s.Items).ThenInclude(si => si.Product)
+            .Include(s => s.Items).ThenInclude(si => si.StockBatch)
+            .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (sale == null) return NotFound(ApiResponse<ReceiptDto>.Fail("Sale not found."));
+
+        var branch = await _db.Branches.FirstOrDefaultAsync(b => b.Id == sale.BranchId);
+        var dto = new ReceiptDto(
+            sale.Id,
+            sale.InvoiceNumber,
+            sale.BranchId,
+            branch?.Name ?? "PharmaFlow Pharmacy",
+            branch?.Address ?? "",
+            branch?.Phone ?? "",
+            sale.CreatedAtUtc,
+            DateTime.UtcNow,
+            true, // reprint
+            sale.CashierUserId.ToString(),
+            sale.CustomerName,
+            sale.Subtotal,
+            sale.DiscountTotal,
+            sale.TaxTotal,
+            sale.GrandTotal,
+            sale.TenderedAmount,
+            sale.ChangeGiven,
+            sale.PaymentMethod,
+            sale.Items.Select(i => new ReceiptItemDto(
+                i.ProductId,
+                i.Product?.BrandName ?? "Item",
+                i.BatchNumber,
+                i.StockBatch?.ExpiryDate ?? DateTime.UtcNow,
+                i.Quantity,
+                i.UnitPrice,
+                i.DiscountAmount,
+                i.LineTotal
+            )).ToList()
+        );
+
+        return Ok(ApiResponse<ReceiptDto>.Ok(dto));
     }
 
     [HttpGet("sales/invoice/{invoiceNumber}")]
@@ -165,6 +210,37 @@ public class PosController : ControllerBase
             .Select(s => new SaleDto(
                 s.Id,
                 s.InvoiceNumber,
+                s.BranchId,
+                s.RegisterId,
+                s.ShiftId,
+                s.CreatedAtUtc,
+                s.CustomerName,
+                s.Subtotal,
+                s.DiscountTotal,
+                s.TaxTotal,
+                s.GrandTotal,
+                s.TenderedAmount,
+                s.ChangeGiven,
+                s.PaymentMethod,
+                s.Status,
+                s.Items.Select(i => new SaleItemDto(
+                    i.Id,
+                    i.ProductId,
+                    i.Product.BrandName,
+                    i.BatchNumber,
+                    DateTime.UtcNow,
+                    i.Quantity,
+                    i.UnitPrice,
+                    i.DiscountAmount,
+                    i.LineTotal,
+                    i.RemainingReturnableQuantity
+                )).ToList()
+            ))
+            .ToListAsync();
+
+        return Ok(ApiResponse<PagedResult<SaleDto>>.Ok(new PagedResult<SaleDto>(sales, total, pageIndex, pageSize)));
+    }
+}
                 s.BranchId,
                 s.RegisterId,
                 s.ShiftId,

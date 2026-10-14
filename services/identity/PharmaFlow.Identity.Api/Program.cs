@@ -47,6 +47,7 @@ builder.Services.AddDbContext<IdentityDbContext>(options =>
 builder.Services.AddSingleton<IPasswordHasher, PasswordHasher>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IBootstrapService, BootstrapService>();
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 
 // JWT Authentication
 var jwtSecret = builder.Configuration["Jwt:Secret"] ?? "PharmaFlow_Ultra_Secure_Dev_Signing_Key_2026_AtLeast32Bytes!";
@@ -87,6 +88,142 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Local Development Admin Recovery CLI (Non-HTTP, explicit interactive command)
+if (args.Contains("--recover-admin"))
+{
+    if (!app.Environment.IsDevelopment())
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("[ERROR] The admin recovery command is only permitted in the Development environment.");
+        Console.ResetColor();
+        return;
+    }
+
+    using var recoveryScope = app.Services.CreateScope();
+    var db = recoveryScope.ServiceProvider.GetRequiredService<IdentityDbContext>();
+    var hasher = recoveryScope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+
+    Console.WriteLine("==================================================");
+    Console.WriteLine(" PharmaFlow - Local Development Admin Recovery CLI");
+    Console.WriteLine("==================================================");
+
+    var superAdmins = await db.Users
+        .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+        .Where(u => u.UserRoles.Any(ur => ur.Role.Name == "SuperAdmin"))
+        .ToListAsync();
+
+    if (superAdmins.Count == 0)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("[ERROR] No existing SuperAdmin accounts found in the database.");
+        Console.ResetColor();
+        return;
+    }
+
+    Console.WriteLine("\nExisting SuperAdmin accounts:");
+    for (int i = 0; i < superAdmins.Count; i++)
+    {
+        var sa = superAdmins[i];
+        Console.WriteLine($"  [{i + 1}] Email: {sa.Email} | Name: {sa.FullName} | Active: {sa.IsActive} | Locked: {sa.IsLockedOut}");
+    }
+
+    int selectedIndex = 0;
+    if (superAdmins.Count > 1)
+    {
+        Console.Write($"\nSelect SuperAdmin account [1-{superAdmins.Count}]: ");
+        var choice = Console.ReadLine();
+        if (!int.TryParse(choice, out selectedIndex) || selectedIndex < 1 || selectedIndex > superAdmins.Count)
+        {
+            Console.WriteLine("[ERROR] Invalid selection. Aborting.");
+            return;
+        }
+        selectedIndex--;
+    }
+    else
+    {
+        selectedIndex = 0;
+    }
+
+    var selectedAdmin = superAdmins[selectedIndex];
+    Console.WriteLine($"\nRecovering password for: {selectedAdmin.Email}");
+
+    string ReadHiddenPassword(string prompt)
+    {
+        Console.Write(prompt);
+        var sb = new StringBuilder();
+        while (true)
+        {
+            var keyInfo = Console.ReadKey(intercept: true);
+            if (keyInfo.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                break;
+            }
+            if (keyInfo.Key == ConsoleKey.Backspace)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Remove(sb.Length - 1, 1);
+                    Console.Write("\b \b");
+                }
+            }
+            else if (!char.IsControl(keyInfo.KeyChar))
+            {
+                sb.Append(keyInfo.KeyChar);
+                Console.Write("*");
+            }
+        }
+        return sb.ToString();
+    }
+
+    string newPass = ReadHiddenPassword("Enter new password (min 8 chars): ");
+    if (string.IsNullOrWhiteSpace(newPass) || newPass.Length < 8)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("[ERROR] Password must be at least 8 characters long. Aborting.");
+        Console.ResetColor();
+        return;
+    }
+
+    string confirmPass = ReadHiddenPassword("Confirm new password: ");
+    if (newPass != confirmPass)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("[ERROR] Passwords do not match. Aborting.");
+        Console.ResetColor();
+        return;
+    }
+
+    // Update password hash using application's IPasswordHasher
+    selectedAdmin.PasswordHash = hasher.HashPassword(newPass);
+    selectedAdmin.FailedLoginAttempts = 0;
+    selectedAdmin.IsLockedOut = false;
+    selectedAdmin.LockoutEndUtc = null;
+    selectedAdmin.UpdatedAtUtc = DateTime.UtcNow;
+
+    // Invalidate existing sessions using the application's supported mechanism
+    var activeTokens = await db.RefreshTokens
+        .Where(rt => rt.UserId == selectedAdmin.Id && rt.RevokedAtUtc == null)
+        .ToListAsync();
+    foreach (var rt in activeTokens)
+    {
+        rt.RevokedAtUtc = DateTime.UtcNow;
+    }
+
+    await db.SaveChangesAsync();
+
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine("\n[SUCCESS] Password updated successfully!");
+    Console.WriteLine($"  - Account: {selectedAdmin.Email}");
+    Console.WriteLine($"  - Sessions Revoked: {activeTokens.Count} active refresh token(s) invalidated.");
+    Console.WriteLine("  - Account Lockout: Cleared.");
+    Console.WriteLine("  - Roles & Bootstrap State: Preserved.");
+    Console.ResetColor();
+    Console.WriteLine("\nYou can now log in at: http://localhost:4200/login\n");
+    return;
+}
+
 
 if (app.Environment.IsDevelopment())
 {
@@ -136,4 +273,5 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+app.Run();
 app.Run();

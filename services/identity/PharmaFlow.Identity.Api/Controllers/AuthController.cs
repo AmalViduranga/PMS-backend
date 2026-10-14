@@ -19,6 +19,7 @@ public class AuthController : ControllerBase
     private readonly IPasswordHasher _hasher;
     private readonly ITokenService _tokenService;
     private readonly IBootstrapService _bootstrapService;
+    private readonly IEmailSender _emailSender;
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
@@ -26,12 +27,14 @@ public class AuthController : ControllerBase
         IPasswordHasher hasher,
         ITokenService tokenService,
         IBootstrapService bootstrapService,
+        IEmailSender emailSender,
         ILogger<AuthController> logger)
     {
         _db = db;
         _hasher = hasher;
         _tokenService = tokenService;
         _bootstrapService = bootstrapService;
+        _emailSender = emailSender;
         _logger = logger;
     }
 
@@ -69,6 +72,13 @@ public class AuthController : ControllerBase
         if (!user.IsActive)
         {
             return Unauthorized(ApiResponse<LoginResponse>.Fail("Account is inactive. Please contact your administrator."));
+        }
+
+        // Enforce staff access boundary: Customer accounts are strictly denied staff portal access
+        if ((string.IsNullOrWhiteSpace(req.Portal) || req.Portal.Equals("staff", StringComparison.OrdinalIgnoreCase)) &&
+            user.ActorType != ClaimConstants.ActorTypeStaff)
+        {
+            return Unauthorized(ApiResponse<LoginResponse>.Fail("Customer accounts cannot access the staff portal."));
         }
 
         if (user.IsLockedOut && user.LockoutEndUtc.HasValue && user.LockoutEndUtc.Value > DateTime.UtcNow)
@@ -191,34 +201,73 @@ public class AuthController : ControllerBase
     [HttpPost("forgot-password")]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest req)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == req.Email.Trim().ToLower());
-        if (user != null && user.IsActive)
+        if (string.IsNullOrWhiteSpace(req.Email))
         {
-            var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
-            var resetToken = new PasswordResetToken
-            {
-                UserId = user.Id,
-                TokenHash = _hasher.HashPassword(rawToken),
-                ExpiresAtUtc = DateTime.UtcNow.AddHours(1)
-            };
-
-            _db.PasswordResetTokens.Add(resetToken);
-            await _db.SaveChangesAsync();
-
-            // Development sink: log the token safely for local testing
-            _logger.LogInformation("Password reset token generated for user {Email}: {Token}", user.Email, rawToken);
+            return Ok(ApiResponse<bool>.Ok(true, "If an account with that email exists, password reset instructions have been sent."));
         }
 
+        var normalizedEmail = req.Email.Trim().ToLowerInvariant();
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == normalizedEmail);
+
+        if (user != null && user.IsActive)
+        {
+            // Rate-limiting check: At most one token request every 2 minutes per account
+            var hasRecentToken = await _db.PasswordResetTokens
+                .AnyAsync(t => t.UserId == user.Id && t.CreatedAtUtc > DateTime.UtcNow.AddMinutes(-2));
+
+            if (!hasRecentToken)
+            {
+                // Invalidate any previously unconsumed active tokens for this user
+                var previousTokens = await _db.PasswordResetTokens
+                    .Where(t => t.UserId == user.Id && t.UsedAtUtc == null && t.ExpiresAtUtc > DateTime.UtcNow)
+                    .ToListAsync();
+                foreach (var pt in previousTokens)
+                {
+                    pt.UsedAtUtc = DateTime.UtcNow;
+                }
+
+                // Cryptographically secure 256-bit single-use token
+                var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+                var resetToken = new PasswordResetToken
+                {
+                    UserId = user.Id,
+                    TokenHash = _hasher.HashPassword(rawToken),
+                    ExpiresAtUtc = DateTime.UtcNow.AddHours(1)
+                };
+
+                _db.PasswordResetTokens.Add(resetToken);
+                await _db.SaveChangesAsync();
+
+                // Send email to local MailDev (port 1025) or configured SMTP server. Never log raw tokens.
+                await _emailSender.SendPasswordResetEmailAsync(user.Email, user.FullName, rawToken);
+            }
+        }
+
+        // Generic response that does not reveal whether an account exists
         return Ok(ApiResponse<bool>.Ok(true, "If an account with that email exists, password reset instructions have been sent."));
     }
 
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest req)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == req.Email.Trim().ToLower());
-        if (user == null)
+        if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.ResetToken) || string.IsNullOrWhiteSpace(req.NewPassword))
         {
-            return BadRequest(ApiResponse<bool>.Fail("Invalid reset request."));
+            return BadRequest(ApiResponse<bool>.Fail("Invalid password reset request."));
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == req.Email.Trim().ToLower());
+        if (user == null || !user.IsActive)
+        {
+            return BadRequest(ApiResponse<bool>.Fail("Invalid or expired password reset token."));
+        }
+
+        // Backend password validation
+        if (req.NewPassword.Length < 8 ||
+            !req.NewPassword.Any(char.IsUpper) ||
+            !req.NewPassword.Any(char.IsLower) ||
+            !req.NewPassword.Any(char.IsDigit))
+        {
+            return BadRequest(ApiResponse<bool>.Fail("Password must be at least 8 characters and contain uppercase, lowercase, and numeric characters."));
         }
 
         var activeTokens = await _db.PasswordResetTokens
@@ -241,17 +290,33 @@ public class AuthController : ControllerBase
             return BadRequest(ApiResponse<bool>.Fail("Invalid or expired password reset token."));
         }
 
-        if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 8)
-        {
-            return BadRequest(ApiResponse<bool>.Fail("Password must be at least 8 characters."));
-        }
-
-        user.PasswordHash = _hasher.HashPassword(req.NewPassword);
-        user.UpdatedAtUtc = DateTime.UtcNow;
+        // Atomic token consumption
         matchedToken.UsedAtUtc = DateTime.UtcNow;
 
+        // Invalidate all remaining tokens for this user
+        foreach (var t in activeTokens.Where(t => t.Id != matchedToken.Id))
+        {
+            t.UsedAtUtc = DateTime.UtcNow;
+        }
+
+        // Update user credentials & clear lockouts
+        user.PasswordHash = _hasher.HashPassword(req.NewPassword);
+        user.FailedLoginAttempts = 0;
+        user.IsLockedOut = false;
+        user.LockoutEndUtc = null;
+        user.UpdatedAtUtc = DateTime.UtcNow;
+
+        // Invalidate all existing refresh sessions for this user
+        var activeRefreshTokens = await _db.RefreshTokens
+            .Where(rt => rt.UserId == user.Id && rt.RevokedAtUtc == null)
+            .ToListAsync();
+        foreach (var rt in activeRefreshTokens)
+        {
+            rt.RevokedAtUtc = DateTime.UtcNow;
+        }
+
         await _db.SaveChangesAsync();
-        return Ok(ApiResponse<bool>.Ok(true, "Password successfully reset. You may now log in."));
+        return Ok(ApiResponse<bool>.Ok(true, "Password successfully reset. You may now log in with your new password."));
     }
 
     [Authorize]

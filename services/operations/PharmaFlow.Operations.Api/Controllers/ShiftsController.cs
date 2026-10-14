@@ -24,7 +24,7 @@ public class ShiftsController : ControllerBase
     [HttpGet("current")]
     public async Task<IActionResult> GetCurrentShift([FromQuery] Guid? registerId)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var query = _db.CashierShifts
@@ -49,7 +49,7 @@ public class ShiftsController : ControllerBase
     [HttpPost("open")]
     public async Task<IActionResult> OpenShift([FromBody] OpenShiftRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         // Check if cashier already has an open shift on this register
@@ -116,7 +116,7 @@ public class ShiftsController : ControllerBase
     [HttpPost("{id}/cash-movement")]
     public async Task<IActionResult> RecordCashMovement(Guid id, [FromBody] CashMovementRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var shift = await _db.CashierShifts.FirstOrDefaultAsync(s => s.Id == id);

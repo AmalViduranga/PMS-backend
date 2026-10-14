@@ -104,7 +104,7 @@ public class PurchasingController : ControllerBase
     [HttpPost("purchase-orders")]
     public async Task<IActionResult> CreatePurchaseOrder([FromBody] CreatePurchaseOrderRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var poNumber = $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString()[..6].ToUpperInvariant()}";
@@ -148,7 +148,7 @@ public class PurchasingController : ControllerBase
     [HttpPost("purchase-orders/{id}/approve")]
     public async Task<IActionResult> ApprovePurchaseOrder(Guid id)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var po = await _db.PurchaseOrders.FirstOrDefaultAsync(p => p.Id == id);
@@ -173,7 +173,7 @@ public class PurchasingController : ControllerBase
     [HttpPost("purchase-orders/{id}/receive")]
     public async Task<IActionResult> ReceiveGoods(Guid id, [FromBody] ReceiveGoodsReceiptRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         var po = await _db.PurchaseOrders
@@ -185,6 +185,16 @@ public class PurchasingController : ControllerBase
         if (po.Status != "Approved" && po.Status != "PartiallyReceived")
         {
             return BadRequest(ApiResponse<string>.Fail($"Cannot receive PO in '{po.Status}' status. Must be Approved."));
+        }
+
+        // Duplicate goods receipt invoice check
+        if (!string.IsNullOrWhiteSpace(req.SupplierInvoiceNumber))
+        {
+            var duplicateInvoice = await _db.GoodsReceipts.FirstOrDefaultAsync(g => g.PurchaseOrderId == po.Id && g.SupplierInvoiceNumber.Trim().ToLower() == req.SupplierInvoiceNumber.Trim().ToLower());
+            if (duplicateInvoice != null)
+            {
+                return BadRequest(ApiResponse<string>.Fail($"Goods receipt with supplier invoice '{req.SupplierInvoiceNumber}' has already been processed for this purchase order."));
+            }
         }
 
         using var tx = await _db.Database.BeginTransactionAsync();
@@ -221,7 +231,7 @@ public class PurchasingController : ControllerBase
                     PurchaseOrderItemId = poItem.Id,
                     ProductId = itemInput.ProductId,
                     BatchNumber = itemInput.BatchNumber.Trim(),
-                    ExpiryDate = itemInput.ExpiryDate,
+                    ExpiryDate = DateTime.SpecifyKind(itemInput.ExpiryDate.ToUniversalTime(), DateTimeKind.Utc),
                     ReceivedQuantity = itemInput.ReceivedQuantity,
                     BonusQuantity = itemInput.BonusQuantity,
                     MultiplierToBaseUnit = itemInput.MultiplierToBaseUnit,
@@ -246,7 +256,7 @@ public class PurchasingController : ControllerBase
                         BranchId = po.BranchId,
                         ProductId = itemInput.ProductId,
                         BatchNumber = itemInput.BatchNumber.Trim(),
-                        ExpiryDate = itemInput.ExpiryDate,
+                        ExpiryDate = DateTime.SpecifyKind(itemInput.ExpiryDate.ToUniversalTime(), DateTimeKind.Utc),
                         QuantityOnHand = baseQuantity,
                         QuantityReserved = 0,
                         UnitCost = itemInput.UnitAcquisitionCost,
@@ -303,6 +313,16 @@ public class PurchasingController : ControllerBase
             await tx.CommitAsync();
 
             return Ok(ApiResponse<string>.Ok(grn.GrnNumber, "Goods receipt successfully processed and stock updated."));
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return BadRequest(ApiResponse<string>.Fail($"Goods receipt failed: {ex.Message}"));
+        }
+    }
+}
+            }
+            return BadRequest(ApiResponse<string>.Fail($"Goods receipt failed: {ex.Message}"));
         }
         catch (Exception ex)
         {

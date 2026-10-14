@@ -8,7 +8,8 @@ public record BootstrapAdminRequest(
 
 public record LoginRequest(
     string Email,
-    string Password);
+    string Password,
+    string? Portal = "staff");
 
 public record LoginResponse(
     string AccessToken,
@@ -47,3 +48,12 @@ public record CreateUserRequest(
 public record AssignBranchRequest(
     Guid BranchId,
     bool IsPrimary);
+
+public record UpdateUserRequest(
+    string FullName,
+    string? RoleName,
+    List<Guid>? BranchIds,
+    bool? IsActive);
+
+public record UpdateUserStatusRequest(
+    bool IsActive);

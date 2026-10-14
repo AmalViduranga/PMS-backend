@@ -20,6 +20,18 @@ public record CreateBranchRequest(
     string? Timezone,
     string? Currency);
 
+public record UpdateBranchRequest(
+    string Name,
+    string Address,
+    string Phone,
+    string Email,
+    string? Timezone,
+    string? Currency,
+    bool? IsActive);
+
+public record UpdateBranchStatusRequest(
+    bool IsActive);
+
 public record RegisterDto(
     Guid Id,
     Guid BranchId,
@@ -124,6 +136,25 @@ public record UpdateProductPriceRequest(
     decimal NewSellingPrice,
     decimal TaxRatePercentage);
 
+public record UpdateProductRequest(
+    string BrandName,
+    string GenericName,
+    string Strength,
+    string DosageForm,
+    Guid CategoryId,
+    string? StorageCondition,
+    bool IsPrescriptionRequired,
+    bool IsPublishedOnline,
+    bool IsOrderEligible,
+    string? BaseUnit,
+    decimal SellingPrice,
+    decimal CostPrice,
+    decimal TaxRatePercentage,
+    int ReorderThreshold,
+    bool IsActive,
+    List<string>? Barcodes,
+    List<UnitConversionInput>? UnitConversions);
+
 // Shift DTOs
 public record CashierShiftDto(
     Guid Id,
@@ -177,7 +208,9 @@ public record CheckoutLineItemRequest(
     int Quantity, // in base units or pack
     string? PackUnitName,
     decimal UnitPrice,
-    decimal DiscountAmount);
+    decimal DiscountAmount,
+    string? PrescriptionNumber = null,
+    bool PrescriptionVerified = false);
 
 public record SaleDto(
     Guid Id,
@@ -208,6 +241,37 @@ public record SaleItemDto(
     decimal DiscountAmount,
     decimal LineTotal,
     int RemainingReturnableQuantity);
+
+public record ReceiptDto(
+    Guid SaleId,
+    string InvoiceNumber,
+    Guid BranchId,
+    string BranchName,
+    string BranchAddress,
+    string BranchPhone,
+    DateTime CreatedAtUtc,
+    DateTime PrintedAtUtc,
+    bool IsReprint,
+    string? CashierName,
+    string? CustomerName,
+    decimal Subtotal,
+    decimal DiscountTotal,
+    decimal TaxTotal,
+    decimal GrandTotal,
+    decimal TenderedAmount,
+    decimal ChangeGiven,
+    string PaymentMethod,
+    List<ReceiptItemDto> Items);
+
+public record ReceiptItemDto(
+    Guid ProductId,
+    string ProductName,
+    string BatchNumber,
+    DateTime ExpiryDate,
+    int Quantity,
+    decimal UnitPrice,
+    decimal DiscountAmount,
+    decimal LineTotal);
 
 // Supplier & Purchasing DTOs
 public record SupplierDto(
@@ -302,13 +366,30 @@ public record StockAdjustmentRequest(
     int QuantityDelta,
     string Reason);
 
+public record StockMovementDto(
+    Guid Id,
+    Guid BranchId,
+    Guid ProductId,
+    string ProductName,
+    Guid StockBatchId,
+    string BatchNumber,
+    string MovementType,
+    int QuantityDelta,
+    int RemainingQuantity,
+    string ReferenceDocumentType,
+    Guid ReferenceDocumentId,
+    string Reason,
+    Guid PerformedByUserId,
+    DateTime CreatedAtUtc);
+
 // Return DTOs
 public record ProcessReturnRequest(
     Guid OriginalSaleId,
     Guid ShiftId,
     string RefundMethod,
     string Reason,
-    List<ReturnItemLineInput> Items);
+    List<ReturnItemLineInput> Items,
+    string? IdempotencyKey = null);
 
 public record ReturnItemLineInput(
     Guid OriginalSaleItemId,

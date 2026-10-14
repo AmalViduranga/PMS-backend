@@ -143,10 +143,29 @@ public class CatalogueController : ControllerBase
     [HttpPost("products")]
     public async Task<IActionResult> CreateProduct([FromBody] CreateProductRequest req)
     {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.CatalogueWrite || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
         var existingSku = await _db.Products.FirstOrDefaultAsync(p => p.Sku.ToLower() == req.Sku.Trim().ToLower());
         if (existingSku != null)
         {
             return BadRequest(ApiResponse<Guid>.Fail("Product SKU already exists."));
+        }
+
+        if (req.UnitConversions != null && req.UnitConversions.Any(uc => uc.MultiplierToBaseUnit <= 0))
+        {
+            return BadRequest(ApiResponse<Guid>.Fail("Pack multiplier to base unit must be greater than zero."));
+        }
+
+        if (req.Barcodes != null)
+        {
+            foreach (var bc in req.Barcodes.Where(b => !string.IsNullOrWhiteSpace(b)))
+            {
+                var exists = await _db.ProductBarcodes.AnyAsync(b => b.Barcode == bc.Trim());
+                if (exists) return BadRequest(ApiResponse<Guid>.Fail($"Barcode '{bc}' is already assigned to another product."));
+            }
         }
 
         var product = new Product
@@ -200,6 +219,86 @@ public class CatalogueController : ControllerBase
         await _db.SaveChangesAsync();
 
         return Ok(ApiResponse<Guid>.Ok(product.Id, "Product created successfully."));
+    }
+
+    [HttpPut("products/{id}")]
+    public async Task<IActionResult> UpdateProduct(Guid id, [FromBody] UpdateProductRequest req)
+    {
+        if (!User.Claims.Any(c => c.Type == ClaimConstants.Permission && (c.Value == Permissions.CatalogueWrite || c.Value == Permissions.AdminBootstrap)))
+        {
+            return Forbid();
+        }
+
+        var product = await _db.Products
+            .Include(p => p.Barcodes)
+            .Include(p => p.UnitConversions)
+            .FirstOrDefaultAsync(p => p.Id == id);
+
+        if (product == null) return NotFound(ApiResponse<bool>.Fail("Product not found."));
+
+        if (req.UnitConversions != null && req.UnitConversions.Any(uc => uc.MultiplierToBaseUnit <= 0))
+        {
+            return BadRequest(ApiResponse<bool>.Fail("Pack multiplier to base unit must be greater than zero."));
+        }
+
+        if (req.Barcodes != null)
+        {
+            foreach (var bc in req.Barcodes.Where(b => !string.IsNullOrWhiteSpace(b)))
+            {
+                var exists = await _db.ProductBarcodes.AnyAsync(b => b.Barcode == bc.Trim() && b.ProductId != id);
+                if (exists) return BadRequest(ApiResponse<bool>.Fail($"Barcode '{bc}' is already assigned to another product."));
+            }
+        }
+
+        product.BrandName = req.BrandName.Trim();
+        product.GenericName = req.GenericName.Trim();
+        product.Strength = req.Strength.Trim();
+        product.DosageForm = req.DosageForm.Trim();
+        product.CategoryId = req.CategoryId;
+        if (!string.IsNullOrWhiteSpace(req.StorageCondition)) product.StorageCondition = req.StorageCondition;
+        product.IsPrescriptionRequired = req.IsPrescriptionRequired;
+        product.IsPublishedOnline = req.IsPublishedOnline;
+        product.IsOrderEligible = req.IsOrderEligible;
+        if (!string.IsNullOrWhiteSpace(req.BaseUnit)) product.BaseUnit = req.BaseUnit;
+        product.SellingPrice = req.SellingPrice;
+        product.CostPrice = req.CostPrice;
+        product.TaxRatePercentage = req.TaxRatePercentage;
+        product.ReorderThreshold = req.ReorderThreshold;
+        product.IsActive = req.IsActive;
+
+        if (req.Barcodes != null)
+        {
+            _db.ProductBarcodes.RemoveRange(product.Barcodes);
+            bool first = true;
+            foreach (var bc in req.Barcodes.Where(b => !string.IsNullOrWhiteSpace(b)))
+            {
+                _db.ProductBarcodes.Add(new ProductBarcode
+                {
+                    ProductId = product.Id,
+                    Barcode = bc.Trim(),
+                    IsPrimary = first
+                });
+                first = false;
+            }
+        }
+
+        if (req.UnitConversions != null)
+        {
+            _db.UnitConversions.RemoveRange(product.UnitConversions);
+            foreach (var uc in req.UnitConversions)
+            {
+                _db.UnitConversions.Add(new UnitConversion
+                {
+                    ProductId = product.Id,
+                    PackUnitName = uc.PackUnitName.Trim(),
+                    MultiplierToBaseUnit = uc.MultiplierToBaseUnit,
+                    PackSellingPrice = uc.PackSellingPrice
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        return Ok(ApiResponse<bool>.Ok(true, "Product updated successfully."));
     }
 
     [HttpGet("products/barcode/{barcode}")]

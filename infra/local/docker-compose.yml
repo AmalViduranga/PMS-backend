@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # -------------------------------------------------------------
   # Core Infrastructure Services
@@ -56,7 +54,7 @@ services:
     restart: unless-stopped
     ports:
       - "${MAILDEV_WEB_PORT:-1080}:1080"
-      - "${MAILDEV_SMTP_PORT:-1025}:1025"
+      - "${MAILDEV_SMTP_PORT:-2525}:1025"
 
   # -------------------------------------------------------------
   # Application Microservices & Gateway

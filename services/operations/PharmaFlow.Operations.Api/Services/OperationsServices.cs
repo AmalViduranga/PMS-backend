@@ -33,6 +33,8 @@ public class InventoryService : IInventoryService
                         b.ExpiryDate > now &&
                         (b.QuantityOnHand - b.QuantityReserved) > 0)
             .OrderBy(b => b.ExpiryDate)
+            .ThenBy(b => b.CreatedAtUtc)
+            .ThenBy(b => b.BatchNumber)
             .ToListAsync();
 
         int totalAvailable = availableBatches.Sum(b => b.QuantityOnHand - b.QuantityReserved);
@@ -134,6 +136,17 @@ public class PosService : IPosService
                 .FirstOrDefaultAsync(s => s.IdempotencyKey == req.IdempotencyKey);
             if (existingSale != null)
             {
+                // Verify payload consistency: reject key reuse if payload differs
+                bool branchMatches = existingSale.BranchId == req.BranchId;
+                bool shiftMatches = existingSale.ShiftId == req.ShiftId;
+                bool itemsCountMatches = existingSale.Items.Count == req.Items.Count;
+                bool itemsMatch = req.Items.All(ri => existingSale.Items.Any(ei => ei.ProductId == ri.ProductId));
+
+                if (!branchMatches || !shiftMatches || !itemsCountMatches || !itemsMatch)
+                {
+                    return ApiResponse<SaleDto>.Fail("Idempotency key was previously used with a different request payload.");
+                }
+
                 return ApiResponse<SaleDto>.Ok(MapToDto(existingSale), "Existing transaction returned (idempotent).");
             }
         }
@@ -170,6 +183,15 @@ public class PosService : IPosService
                 if (product == null || !product.IsActive)
                 {
                     return ApiResponse<SaleDto>.Fail($"Product {itemReq.ProductId} not found or inactive.");
+                }
+
+                // Enforce prescription-required restrictions
+                if (product.IsPrescriptionRequired)
+                {
+                    if (string.IsNullOrWhiteSpace(itemReq.PrescriptionNumber) && !itemReq.PrescriptionVerified)
+                    {
+                        return ApiResponse<SaleDto>.Fail($"Product '{product.BrandName}' requires a valid prescription to dispense. Prescription verification is required.");
+                    }
                 }
 
                 // Check unit pack multiplier if specified
@@ -352,6 +374,28 @@ public class ReturnService : IReturnService
 
     public async Task<ApiResponse<CustomerReturnDto>> ProcessReturnAsync(ProcessReturnRequest req, Guid cashierUserId)
     {
+        // 1. Idempotency Check
+        if (!string.IsNullOrWhiteSpace(req.IdempotencyKey))
+        {
+            var existingReturn = await _db.CustomerReturns
+                .Include(r => r.OriginalSale)
+                .FirstOrDefaultAsync(r => r.Reason.Contains($"[IDEMP:{req.IdempotencyKey}]"));
+            if (existingReturn != null)
+            {
+                var cleanedReason = existingReturn.Reason.Replace($" [IDEMP:{req.IdempotencyKey}]", "");
+                return ApiResponse<CustomerReturnDto>.Ok(new CustomerReturnDto(
+                    existingReturn.Id,
+                    existingReturn.ReturnNumber,
+                    existingReturn.OriginalSaleId,
+                    existingReturn.OriginalSale?.InvoiceNumber ?? "",
+                    existingReturn.RefundTotal,
+                    existingReturn.RefundMethod,
+                    cleanedReason,
+                    existingReturn.CreatedAtUtc
+                ), "Existing return transaction returned (idempotent).");
+            }
+        }
+
         var originalSale = await _db.Sales
             .Include(s => s.Items).ThenInclude(si => si.Product)
             .FirstOrDefaultAsync(s => s.Id == req.OriginalSaleId);
@@ -365,6 +409,12 @@ public class ReturnService : IReturnService
         if (shift == null || shift.Status != "Open")
         {
             return ApiResponse<CustomerReturnDto>.Fail("Cashier shift is not open.");
+        }
+
+        // Branch check: ensure shift belongs to the branch where the original sale occurred
+        if (shift.BranchId != originalSale.BranchId)
+        {
+            return ApiResponse<CustomerReturnDto>.Fail("Cannot process return: Cashier shift branch does not match original sale branch.");
         }
 
         using var tx = await _db.Database.BeginTransactionAsync();
@@ -418,7 +468,26 @@ public class ReturnService : IReturnService
                     DispositionStatus = "Quarantined",
                     DispositionNotes = $"Quarantined from customer return {returnNumber}"
                 });
+
+                // Add Stock Movement Ledger Entry for Quarantine Routing
+                _db.StockMovementLedgers.Add(new StockMovementLedger
+                {
+                    BranchId = originalSale.BranchId,
+                    ProductId = originalItem.ProductId,
+                    StockBatchId = quarantineBatch.Id,
+                    MovementType = "CustomerReturnQuarantine",
+                    QuantityDelta = itemInput.ReturnedQuantity,
+                    RemainingQuantity = itemInput.ReturnedQuantity,
+                    ReferenceDocumentType = "CustomerReturn",
+                    ReferenceDocumentId = Guid.Empty, // set after return save
+                    Reason = $"Quarantine transfer from return {returnNumber}",
+                    PerformedByUserId = cashierUserId
+                });
             }
+
+            string storedReason = !string.IsNullOrWhiteSpace(req.IdempotencyKey)
+                ? $"{req.Reason} [IDEMP:{req.IdempotencyKey}]"
+                : req.Reason;
 
             var customerReturn = new CustomerReturn
             {
@@ -429,7 +498,7 @@ public class ReturnService : IReturnService
                 CashierUserId = cashierUserId,
                 RefundMethod = req.RefundMethod,
                 RefundTotal = refundTotal,
-                Reason = req.Reason,
+                Reason = storedReason,
                 Items = returnItems
             };
             _db.CustomerReturns.Add(customerReturn);
@@ -440,6 +509,14 @@ public class ReturnService : IReturnService
             }
 
             await _db.SaveChangesAsync();
+
+            // Link CustomerReturn ID in movement ledger
+            foreach (var sm in _db.StockMovementLedgers.Local.Where(m => m.ReferenceDocumentId == Guid.Empty))
+            {
+                sm.ReferenceDocumentId = customerReturn.Id;
+            }
+            await _db.SaveChangesAsync();
+
             await tx.CommitAsync();
 
             return ApiResponse<CustomerReturnDto>.Ok(new CustomerReturnDto(
@@ -449,7 +526,7 @@ public class ReturnService : IReturnService
                 originalSale.InvoiceNumber,
                 customerReturn.RefundTotal,
                 customerReturn.RefundMethod,
-                customerReturn.Reason,
+                req.Reason,
                 customerReturn.CreatedAtUtc
             ), "Return processed and stock quarantined.");
         }

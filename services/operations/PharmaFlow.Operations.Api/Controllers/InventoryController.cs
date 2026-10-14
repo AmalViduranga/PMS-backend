@@ -69,7 +69,7 @@ public class InventoryController : ControllerBase
     [HttpPost("adjust")]
     public async Task<IActionResult> AdjustStock([FromBody] StockAdjustmentRequest req)
     {
-        var userIdStr = User.FindFirstValue(ClaimConstants.UserId);
+        var userIdStr = User.GetUserId();
         if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
 
         try
@@ -147,5 +147,47 @@ public class InventoryController : ControllerBase
         }
 
         return Ok(ApiResponse<object>.Ok(lowStockList));
+    }
+
+    [HttpGet("movements")]
+    public async Task<IActionResult> GetStockMovements(
+        [FromQuery] Guid? branchId,
+        [FromQuery] Guid? productId,
+        [FromQuery] Guid? batchId,
+        [FromQuery] int pageIndex = 0,
+        [FromQuery] int pageSize = 50)
+    {
+        var query = _db.StockMovementLedgers
+            .Include(m => m.StockBatch).ThenInclude(b => b.Product)
+            .AsQueryable();
+
+        if (branchId.HasValue) query = query.Where(m => m.BranchId == branchId.Value);
+        if (productId.HasValue) query = query.Where(m => m.ProductId == productId.Value);
+        if (batchId.HasValue) query = query.Where(m => m.StockBatchId == batchId.Value);
+
+        var total = await query.CountAsync();
+        var movements = await query
+            .OrderByDescending(m => m.CreatedAtUtc)
+            .Skip(pageIndex * pageSize)
+            .Take(pageSize)
+            .Select(m => new StockMovementDto(
+                m.Id,
+                m.BranchId,
+                m.ProductId,
+                m.StockBatch.Product.BrandName,
+                m.StockBatchId,
+                m.StockBatch.BatchNumber,
+                m.MovementType,
+                m.QuantityDelta,
+                m.RemainingQuantity,
+                m.ReferenceDocumentType,
+                m.ReferenceDocumentId,
+                m.Reason,
+                m.PerformedByUserId,
+                m.CreatedAtUtc
+            ))
+            .ToListAsync();
+
+        return Ok(ApiResponse<PagedResult<StockMovementDto>>.Ok(new PagedResult<StockMovementDto>(movements, total, pageIndex, pageSize)));
     }
 }

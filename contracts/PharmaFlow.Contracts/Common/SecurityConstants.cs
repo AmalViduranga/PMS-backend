@@ -54,3 +54,12 @@ public static class ClaimConstants
     public const string ActorTypeStaff = "staff";
     public const string ActorTypeCustomer = "customer";
 }
+
+public static class ClaimsPrincipalExtensions
+{
+    public static string? GetUserId(this System.Security.Claims.ClaimsPrincipal principal)
+    {
+        return principal.FindFirst(ClaimConstants.UserId)?.Value 
+            ?? principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    }
+}

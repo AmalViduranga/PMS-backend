@@ -71,8 +71,11 @@ public class TokenService : ITokenService
         var claims = new List<Claim>
         {
             new(ClaimConstants.UserId, user.Id.ToString()),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimConstants.Email, user.Email),
+            new(ClaimTypes.Email, user.Email),
             new(ClaimConstants.FullName, user.FullName),
+            new(ClaimTypes.Name, user.FullName),
             new(ClaimConstants.ActorType, user.ActorType),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
@@ -338,3 +341,72 @@ public class BootstrapService : IBootstrapService
         return ApiResponse<Guid>.Ok(adminUser.Id, "SuperAdmin successfully created. Bootstrap is now closed.");
     }
 }
+
+public interface IEmailSender
+{
+    Task SendPasswordResetEmailAsync(string recipientEmail, string recipientName, string rawToken);
+}
+
+public class SmtpEmailSender : IEmailSender
+{
+    private readonly IConfiguration _config;
+    private readonly ILogger<SmtpEmailSender> _logger;
+
+    public SmtpEmailSender(IConfiguration config, ILogger<SmtpEmailSender> logger)
+    {
+        _config = config;
+        _logger = logger;
+    }
+
+    public async Task SendPasswordResetEmailAsync(string recipientEmail, string recipientName, string rawToken)
+    {
+        var smtpHost = _config["Email:SmtpHost"] ?? "127.0.0.1";
+        var smtpPort = int.TryParse(_config["Email:SmtpPort"], out var p) ? p : 2525;
+        var senderEmail = _config["Email:SenderEmail"] ?? "security@pharmaflow.local";
+        var senderName = _config["Email:SenderName"] ?? "PharmaFlow Security";
+        var frontendBaseUrl = _config["Email:FrontendBaseUrl"] ?? "http://localhost:4200";
+
+        var resetUrl = $"{frontendBaseUrl.TrimEnd('/')}/reset-password?token={Uri.EscapeDataString(rawToken)}&email={Uri.EscapeDataString(recipientEmail)}";
+
+        try
+        {
+            using var client = new System.Net.Mail.SmtpClient(smtpHost, smtpPort)
+            {
+                EnableSsl = bool.TryParse(_config["Email:EnableSsl"], out var ssl) && ssl,
+                DeliveryMethod = System.Net.Mail.SmtpDeliveryMethod.Network,
+                Timeout = 10000
+            };
+
+            var mail = new System.Net.Mail.MailMessage
+            {
+                From = new System.Net.Mail.MailAddress(senderEmail, senderName),
+                Subject = "PharmaFlow Staff Password Reset Request",
+                IsBodyHtml = true,
+                Body = $@"
+<div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #0f172a; color: #f8fafc; border-radius: 12px; border: 1px solid #1e293b;'>
+    <div style='text-align: center; margin-bottom: 24px;'>
+        <div style='font-size: 32px;'>💊</div>
+        <h2 style='color: #14b8a6; margin: 8px 0 0;'>PharmaFlow Security</h2>
+    </div>
+    <p>Hello {System.Net.WebUtility.HtmlEncode(recipientName)},</p>
+    <p>A password reset request was initiated for your PharmaFlow staff account.</p>
+    <div style='text-align: center; margin: 32px 0;'>
+        <a href='{resetUrl}' style='display: inline-block; background: #0d9488; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: bold; font-size: 15px;'>Reset Your Password</a>
+    </div>
+    <p style='color: #94a3b8; font-size: 13px;'>If the button above does not work, copy and paste this link into your browser:</p>
+    <p style='background: #1e293b; padding: 10px; border-radius: 6px; word-break: break-all; font-size: 12px; color: #cbd5e1;'>{resetUrl}</p>
+    <p style='color: #94a3b8; font-size: 12px; margin-top: 24px;'>This link is valid for 1 hour and can only be used once. If you did not request this reset, please ignore this email.</p>
+</div>"
+            };
+            mail.To.Add(new System.Net.Mail.MailAddress(recipientEmail, recipientName));
+
+            await client.SendMailAsync(mail);
+            _logger.LogInformation("Password reset email delivered to MailDev/SMTP ({Host}:{Port}) for {Email}", smtpHost, smtpPort, recipientEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send password reset email to {Email}", recipientEmail);
+        }
+    }
+}
+
